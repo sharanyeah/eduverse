@@ -11,7 +11,7 @@ class DeepTutorEngine {
   private ai: GoogleGenAI | null = null;
 
   private isProduction() {
-    // Safely check for window to prevent crashes in Node.js environments like Netlify Functions
+    // SSR and Server-safe check
     if (typeof window === 'undefined') return true; 
     
     return window.location.hostname !== 'localhost' && 
@@ -21,7 +21,11 @@ class DeepTutorEngine {
 
   private getAi() {
     if (!this.ai) {
-      const key = process.env.API_KEY;
+      // Robust key retrieval for local dev (Vite) and production (Netlify)
+      const key = typeof process !== 'undefined' && process.env.API_KEY
+        ? process.env.API_KEY
+        : (import.meta as any).env?.VITE_API_KEY || process.env.API_KEY;
+
       if (!key) throw new Error("API_KEY_MISSING");
       this.ai = new GoogleGenAI({ apiKey: key });
     }
@@ -50,15 +54,23 @@ class DeepTutorEngine {
   }
 
   async generate(params: any) {
-    const modelName = params.isInitialScan ? 'gemini-flash-lite-latest' : 'gemini-3-flash-preview';
+    // Explicit narrowing for TypeScript safety during build
+    const prompt: string = params.prompt ?? '';
+    const history: any[] = Array.isArray(params.history) ? params.history : [];
+    const maxTokens: number = typeof params.maxTokens === 'number' ? params.maxTokens : 1024;
+    const useSearch: boolean = !!params.useSearch;
+    const isInitialScan: boolean = !!params.isInitialScan;
+    const system: string = params.system || DEEPTUTOR_SYSTEM_PROMPT;
+    
+    const modelName = isInitialScan ? 'gemini-flash-lite-latest' : 'gemini-3-flash-preview';
     
     // PREPARE CONTENTS
-    const contents: any[] = (params.history || []).map((m: any) => ({
+    const contents: any[] = history.map((m: any) => ({
       role: m.role === 'model' ? 'model' : 'user',
       parts: [{ text: m.text }]
     }));
 
-    const promptParts: any[] = [{ text: params.prompt }];
+    const promptParts: any[] = [{ text: prompt }];
     
     const attachment = params.attachment as FileAttachment | undefined;
     if (attachment && attachment.data && typeof attachment.data === 'string') {
@@ -66,15 +78,15 @@ class DeepTutorEngine {
       const mime: string = attachment.mimeType;
       const name: string = attachment.name;
 
-      if (params.isInitialScan && mime === 'application/pdf') {
-        promptParts[0].text = `Seed Document: "${name}"\nType: Academic Archive\n\n${params.prompt}`;
+      if (isInitialScan && mime === 'application/pdf') {
+        promptParts[0].text = `Seed Document: "${name}"\nType: Academic Archive\n\n${prompt}`;
       } else if (mime.startsWith('text/')) {
-        // Environment-safe base64 decoding
+        // Safe base64 decoding for both browser and Node
         const decoded = typeof atob === 'function' 
           ? atob(data) 
           : Buffer.from(data, 'base64').toString('utf-8');
           
-        promptParts[0].text = `[DOC_CONTEXT]\n${decoded.substring(0, 30000)}\n[/DOC_CONTEXT]\n\n${params.prompt}`;
+        promptParts[0].text = `[DOC_CONTEXT]\n${decoded.substring(0, 30000)}\n[/DOC_CONTEXT]\n\n${prompt}`;
       } else {
         promptParts.push({ inlineData: { data, mimeType: mime } });
       }
@@ -83,20 +95,21 @@ class DeepTutorEngine {
     contents.push({ role: 'user', parts: promptParts });
 
     const config: any = {
-      systemInstruction: params.system || DEEPTUTOR_SYSTEM_PROMPT,
+      systemInstruction: system,
       temperature: 0.1,
-      maxOutputTokens: params.maxTokens || 4096,
+      maxOutputTokens: maxTokens,
       responseMimeType: "application/json"
     };
 
-    if (params.useSearch) {
+    if (useSearch) {
       config.tools = [{ googleSearch: {} }];
     }
 
     // PRODUCTION PROXY LOGIC
     if (this.isProduction()) {
       try {
-        const response = await fetch('/.netlify/functions/gemini-proxy', {
+        // Cast fetch for build compatibility
+        const response = await (globalThis.fetch as any)('/.netlify/functions/gemini-proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: modelName, contents, config })
@@ -238,7 +251,7 @@ export const chatWithTutor = async (history: Message[], currentSection: CourseSe
   return await engine.generate({ prompt, history, maxTokens: 1000 });
 };
 
-export const generateStudySchedule = async (subject: string, concepts: CourseSection[]) => {
+export const generateStudySchedule = async (subject: string, concepts: CourseSection[]): Promise<ScheduleItem[]> => {
   const prompt = `Detailed itinerary for: ${subject}.\nJSON Array: [{title, durationMinutes, focus}]`;
   const result = await engine.generate({ prompt, maxTokens: 800 });
   return result || [];
