@@ -29,11 +29,13 @@ class DeepTutorEngine {
 
   private getAi() {
     if (!this.ai) {
+      // In Vite/Netlify client side, process.env is usually not defined directly 
+      // unless injected via vite.config.ts define block.
       const key = (typeof process !== 'undefined' && process.env.API_KEY)
         ? process.env.API_KEY
         : (import.meta as any).env?.VITE_API_KEY;
 
-      if (!key) throw new Error("API_KEY_MISSING");
+      if (!key) throw new Error("API_KEY_MISSING_LOCALLY");
       this.ai = new GoogleGenAI({ apiKey: key });
     }
     return this.ai;
@@ -119,23 +121,19 @@ class DeepTutorEngine {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `PROXY_HTTP_ERROR_${response.status}`);
+          const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}`;
+          throw new Error(`SERVER_PROXY_ERROR: ${errorMsg}`);
         }
 
         const result = await response.json();
         return this.sanitizeJson(String(result.text ?? ''));
       } catch (e: any) {
         console.error("DeepTutor Proxy Failure:", e.message);
-        // Direct fallback only if we have a key locally (usually fails in prod)
-        try {
-          const ai = this.getAi();
-          const response = await ai.models.generateContent({ model: modelName, contents, config });
-          return this.sanitizeJson(String(response.text ?? ''));
-        } catch (fallbackError) {
-          throw new Error(`Knowledge Archive unreachable. ${e.message}`);
-        }
+        // Rethrow proxy errors in production to avoid confusing fallbacks
+        throw e;
       }
     } else {
+      // Local development fallback
       const ai = this.getAi();
       const response = await ai.models.generateContent({ model: modelName, contents, config });
       return this.sanitizeJson(String(response.text ?? ''));
@@ -147,9 +145,20 @@ const engine = new DeepTutorEngine();
 
 export const handleAIError = (error: any): string => {
   console.error("DeepTutor Service Error:", error);
-  if (error.message?.includes("API_KEY_MISSING")) {
-    return "Error: Gemini API Key is missing. Please check your Netlify environment variables.";
+  const msg = error.message || "";
+  
+  if (msg.includes("API_KEY_MISSING_ON_SERVER")) {
+    return "Netlify Error: The API_KEY environment variable is not set in your Netlify dashboard. Please add it to Site Settings > Environment Variables.";
   }
+  
+  if (msg.includes("API_KEY_MISSING_LOCALLY")) {
+    return "Development Error: No local API key found. Create a .env file with API_KEY=[key].";
+  }
+
+  if (msg.includes("SERVER_PROXY_ERROR")) {
+    return `Server Error: ${msg.replace("SERVER_PROXY_ERROR: ", "")}`;
+  }
+
   return "Neural sync disrupted. Adjusting cognitive parameters...";
 };
 
