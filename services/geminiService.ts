@@ -75,9 +75,10 @@ class DeepTutorEngine {
     
     const attachment = params.attachment as FileAttachment | undefined;
     if (attachment && attachment.data && typeof attachment.data === 'string') {
-      const data: string = attachment.data;
-      const mime: string = attachment.mimeType;
-      const name: string = attachment.name;
+      // MANDATORY FIX: Materialize and default these values to guarantee string type
+      const data: string = attachment.data ?? '';
+      const mime: string = attachment.mimeType ?? 'application/octet-stream';
+      const name: string = attachment.name ?? 'Uploaded Document';
 
       if (isInitialScan && mime === 'application/pdf') {
         promptParts[0].text = `Seed Document: "${name}"\nType: Academic Archive\n\n${prompt}`;
