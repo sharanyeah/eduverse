@@ -61,7 +61,6 @@ class DeepTutorEngine {
   }
 
   async generate(params: GenerateParams) {
-    // MANDATORY FIX: Materialize parameters as guaranteed non-optional types
     const prompt: string = String(params.prompt ?? '');
     const history: any[] = Array.isArray(params.history) ? params.history : [];
     const maxTokens: number = typeof params.maxTokens === 'number' ? params.maxTokens : 1024;
@@ -80,7 +79,6 @@ class DeepTutorEngine {
     
     const attachment = params.attachment;
     if (attachment && attachment.data) {
-      // MANDATORY FIX: Explicitly materialize and stringify attachment properties to satisfy strict tsc
       const data: string = String(attachment.data ?? '');
       const mime: string = String(attachment.mimeType ?? 'application/octet-stream');
       const name: string = String(attachment.name ?? 'Uploaded Document');
@@ -113,19 +111,29 @@ class DeepTutorEngine {
 
     if (this.isProduction()) {
       try {
-        const response = await (globalThis.fetch as any)('/.netlify/functions/gemini-proxy', {
+        const response = await fetch('/.netlify/functions/gemini-proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: modelName, contents, config })
         });
-        if (!response.ok) throw new Error("PROXY_REQUEST_FAILED");
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `PROXY_HTTP_ERROR_${response.status}`);
+        }
+
         const result = await response.json();
         return this.sanitizeJson(String(result.text ?? ''));
-      } catch (e) {
-        console.error("Production Proxy Error, attempting direct fallback...", e);
-        const ai = this.getAi();
-        const response = await ai.models.generateContent({ model: modelName, contents, config });
-        return this.sanitizeJson(String(response.text ?? ''));
+      } catch (e: any) {
+        console.error("DeepTutor Proxy Failure:", e.message);
+        // Direct fallback only if we have a key locally (usually fails in prod)
+        try {
+          const ai = this.getAi();
+          const response = await ai.models.generateContent({ model: modelName, contents, config });
+          return this.sanitizeJson(String(response.text ?? ''));
+        } catch (fallbackError) {
+          throw new Error(`Knowledge Archive unreachable. ${e.message}`);
+        }
       }
     } else {
       const ai = this.getAi();
@@ -139,6 +147,9 @@ const engine = new DeepTutorEngine();
 
 export const handleAIError = (error: any): string => {
   console.error("DeepTutor Service Error:", error);
+  if (error.message?.includes("API_KEY_MISSING")) {
+    return "Error: Gemini API Key is missing. Please check your Netlify environment variables.";
+  }
   return "Neural sync disrupted. Adjusting cognitive parameters...";
 };
 
