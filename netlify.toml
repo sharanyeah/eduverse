@@ -1,12 +1,11 @@
+
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"
 
 [functions]
-  directory = "netlify/functions"
-
-  [functions.node_bundle]
-    external_node_modules = ["@google/genai"]
+  node_bundle = true
 
 [[redirects]]
   from = "/*"
