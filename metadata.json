@@ -1,0 +1,9 @@
+
+{
+  "name": "LearnVerse AI",
+  "description": "An advanced intelligent tutoring system that utilizes deep reasoning capabilities to provide personalized, Socratic-style learning paths and real-time knowledge tracing.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
