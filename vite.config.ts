@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      minify: 'terser',
+      // Removed minify: 'terser' to use default 'esbuild' and avoid "terser not found" errors on Netlify
       rollupOptions: {
         output: {
           manualChunks: {
